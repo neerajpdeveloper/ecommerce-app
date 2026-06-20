@@ -26,7 +26,7 @@ class AuthController extends Controller
 
         $user->load('role');
 
-        if (!$user->role || $user->role->slug !== 'admin') {
+        if (!$user->role) {
             Auth::logout();
             return back()->withErrors(['error' => 'Access denied']);
         }
@@ -81,4 +81,76 @@ public function logout()
     auth()->logout();
     return redirect('/admin/login');
 }
+
+public function showForgotForm()
+    {
+        return view('auth.forgot-password');
+    }
+
+    public function sendResetLink(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email'
+        ]);
+
+        $user = User::where('email', $request->email)->first();
+
+        if (!$user) {
+            return back()->with('error', 'Email not found');
+        }
+
+        $token = Str::random(64);
+
+        DB::table('password_reset_tokens')->updateOrInsert(
+            ['email' => $user->email],
+            [
+                'token' => Hash::make($token),
+                'created_at' => now()
+            ]
+        );
+
+        $link = url('/reset-password/'.$token.'?email='.$user->email);
+
+        Mail::raw("Reset Password Link: ".$link, function ($message) use ($user) {
+            $message->to($user->email)
+                    ->subject('Reset Password');
+        });
+
+        return back()->with('success', 'Reset link sent successfully.');
+    }
+
+    public function showResetForm(Request $request, $token)
+    {
+        return view('auth.reset-password', [
+            'token' => $token,
+            'email' => $request->email
+        ]);
+    }
+
+    public function resetPassword(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'password' => 'required|min:6|confirmed',
+            'token' => 'required'
+        ]);
+
+        $record = DB::table('password_reset_tokens')
+            ->where('email', $request->email)
+            ->first();
+
+        if (!$record || !Hash::check($request->token, $record->token)) {
+            return back()->with('error', 'Invalid token');
+        }
+
+        User::where('email', $request->email)->update([
+            'password' => Hash::make($request->password)
+        ]);
+
+        DB::table('password_reset_tokens')
+            ->where('email', $request->email)
+            ->delete();
+
+        return redirect('/login')->with('success', 'Password reset successfully');
+    }
 }
